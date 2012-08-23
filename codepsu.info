@@ -1,0 +1,6 @@
+; $Id$
+name = CodePSU
+description = Everything you need to run a CodePSU programming competition.
+package = Penn State ACM
+core = 7.x
+version = 7.x-1.0

@@ -1,0 +1,96 @@
+<?php
+
+function codepsu_schema() {
+    $schema = array();
+
+    $schema['codepsu']   = _codepsu_get_schema();
+
+    return $schema;
+}
+
+
+function _codepsu_get_schema() {
+    return array(
+        'description' => 'CodePSU Competitions',
+        'fields' => array(
+            'nid' => array(
+                'description' => 'The node identifier for a competition (also the primary key)',
+                'type' => 'int',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            'foreword' => array(
+                'description' => 'Text foreword that is displayed on the front page of the competition',
+                'type' => 'text',
+            ),
+            'semester' => array(
+                'description' => 'Year and semester of the competition',
+                'type' => 'varchar',
+                'length' => 255,
+                'not null' => TRUE,
+                'default' => '',
+            ),
+            'time_limit' => array(
+                'description' => 'Time limit for the competition.',
+                'type' => 'int',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            'teams' => array(
+                'description' => 'Team names',
+                'type' => 'varchar',
+                'length' => 2048,
+                'not null' => TRUE,
+                'default' => '',
+            ),
+            'probs' => array(
+                'description' => 'Names of the problems.',
+                'type' => 'varchar',
+                'length' => 2048,
+                'not null' => TRUE,
+                'default' => '',
+            ),
+            'points' => array(
+                'description' => 'Point values for each problem.',
+                'type' => 'varchar',
+                'length' => 2048,
+                'not null' => TRUE,
+                'default' => '',
+            ),
+            'quest_nid' => array(
+                'description' => 'The node identifier for the questions node.',
+                'type' => 'int',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            '_path' => array(
+                'description' => 'Path to the submission directory',
+                'type' => 'varchar',
+                'length' => 2048,
+                'not null' => TRUE,
+                'default' => '',
+            ),
+            'start_time' => array(
+                'description' => 'Time when competition was started.',
+                'type' => 'int',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            'running' => array(
+                'description' => 'Is competition started (1), paused (2), or stopped (0).',
+                'type' => 'int',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+        ),
+
+        'primary key' => array('nid'),
+    );
+}
+
+
+function codepsu_install() {
+    // Build the native execution program
+    chdir(drupal_get_path('module', 'codepsu'));
+    exec('make &');
+}
