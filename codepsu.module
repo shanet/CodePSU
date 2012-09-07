@@ -806,26 +806,28 @@ function codepsu_view_form_submit($form, &$form_state) {
 
   // Upload each of the files
   for($i=1; $i<=$form_state['num_files']; $i++) {
-    // Upload the file a tmp location
-    $file = file_save_upload('file' . $i, array('file_validate_extensions' => array('c cpp h java'), 'file_validate_size' => array(128000)));
-    if($file == FALSE) {
-      drupal_set_message(t('ERROR: Your file either failed validation or there was some other unknown error uploading. Alert one of the judges if the latter.'), 'error');
-      _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'FAILED FILE VALIDATION');
-      return;
-    }
-    
-    // Move the file to the submission directory
-    file_unmanaged_copy($file->uri, $path . '/submissions/team_' . $team . '/prob_' . $prob . '/rev_' . $rev . '/' . $file->filename);
+    if(!empty($_FILES['files']['name']['file' . $i])) {
+      // Upload the file a tmp location
+      $file = file_save_upload('file' . $i, array('file_validate_extensions' => array('c cpp h java'), 'file_validate_size' => array(128000)));
+      if($file == FALSE) {
+        drupal_set_message(t('ERROR: Your file either failed validation or there was some other unknown error uploading. Alert one of the judges if the latter.'), 'error');
+        _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'FAILED FILE VALIDATION');
+        return;
+      }
+      
+      // Move the file to the submission directory
+      file_unmanaged_copy($file->uri, $path . '/submissions/team_' . $team . '/prob_' . $prob . '/rev_' . $rev . '/' . $file->filename);
 
-    // Add the file to the files list
-    $files[] = $file->filename;
+      // Add the file to the files list
+      $files[] = $file->filename;
 
-    // Check/determine language (C, C++, Java)
-    $lang = _codepsu_check_lang($file, $lang);
-    if($lang == 'err') {
-      drupal_set_message(t('ERROR: Multiple languages detected. Make sure all files have consistent file types and are of the same language.'), 'error');
-        _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'MULTIPLE LANAGUES');
-      return;
+      // Check/determine language (C, C++, Java)
+      $lang = _codepsu_check_lang($file, $lang);
+      if($lang == 'err') {
+        drupal_set_message(t('ERROR: Multiple languages detected. Make sure all files have consistent file types and are of the same language.'), 'error');
+          _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'MULTIPLE LANAGUES');
+        return;
+      }
     }
   }
 
