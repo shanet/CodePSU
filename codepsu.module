@@ -11,7 +11,7 @@ function codepsu_node_info() {
 
 
 function codepsu_permission() {
-  return array('administer codepsu'=> array(
+  return array('administer codepsu' => array(
       'title' => t('Administer CodePSU competitions'), 
       'description' => t('Do administrative stuffs for CodePSU.'),
     ),

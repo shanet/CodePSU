@@ -20,7 +20,7 @@
    $minutes = floor($time/60) - $hours*60;
    $seconds = $time - $hours*3600 - $minutes*60;
 
-   $show_scoreboard = ($hours > 0 && $minutes < 45 && $node->running);
+   $show_scoreboard = ($node->running && ($hours > 0 || ($hours <= 0 && $minutes >= 45))) || user_access('administer codepsu');
 
    // Add a leading zero if necessary
    if($hours < 10) {
@@ -156,4 +156,4 @@
    </table>
 <?php endif; ?>
 
-Score table will be hidden during the last 45 minutes of the competition.
+This page does NOT auto-refresh. You must refresh the page to update the scoreboard. The scoreboard will be hidden during the last 45 minutes of the competition.
