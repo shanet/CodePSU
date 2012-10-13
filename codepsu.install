@@ -3,84 +3,65 @@
 function codepsu_schema() {
     $schema = array();
 
-    $schema['codepsu']   = _codepsu_get_schema();
+    $schema['codepsu_competitions'] = _codepsu_get_competition_schema();
+    $schema['codepsu_problems']     = _codepsu_get_problems_schema();
+    $schema['codepsu_teams']        = _codepsu_get_teams_schema();
 
     return $schema;
 }
 
 
-function _codepsu_get_schema() {
+function _codepsu_get_competition_schema() {
     return array(
         'description' => 'CodePSU Competitions',
         'fields' => array(
             'nid' => array(
                 'description' => 'The node identifier for a competition (also the primary key)',
-                'type' => 'int',
-                'unsigned' => TRUE,
-                'not null' => TRUE,
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
             ),
             'foreword' => array(
                 'description' => 'Text foreword that is displayed on the front page of the competition',
-                'type' => 'text',
+                'type'        => 'text',
             ),
             'semester' => array(
                 'description' => 'Year and semester of the competition',
-                'type' => 'varchar',
-                'length' => 255,
-                'not null' => TRUE,
-                'default' => '',
+                'type'        => 'varchar',
+                'length'      => 255,
+                'not null'    => TRUE,
+                'default'     => '',
             ),
             'time_limit' => array(
                 'description' => 'Time limit for the competition.',
-                'type' => 'int',
-                'unsigned' => TRUE,
-                'not null' => TRUE,
-            ),
-            'teams' => array(
-                'description' => 'Team names',
-                'type' => 'varchar',
-                'length' => 2048,
-                'not null' => TRUE,
-                'default' => '',
-            ),
-            'probs' => array(
-                'description' => 'Names of the problems.',
-                'type' => 'varchar',
-                'length' => 2048,
-                'not null' => TRUE,
-                'default' => '',
-            ),
-            'points' => array(
-                'description' => 'Point values for each problem.',
-                'type' => 'varchar',
-                'length' => 2048,
-                'not null' => TRUE,
-                'default' => '',
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
             ),
             'quest_nid' => array(
                 'description' => 'The node identifier for the questions node.',
-                'type' => 'int',
-                'unsigned' => TRUE,
-                'not null' => TRUE,
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
             ),
             '_path' => array(
                 'description' => 'Path to the submission directory',
-                'type' => 'varchar',
-                'length' => 2048,
-                'not null' => TRUE,
-                'default' => '',
+                'type'        => 'varchar',
+                'length'      => 2048,
+                'not null'    => TRUE,
+                'default'     => '',
             ),
             'start_time' => array(
                 'description' => 'Time when competition was started.',
-                'type' => 'int',
-                'unsigned' => TRUE,
-                'not null' => TRUE,
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
             ),
             'running' => array(
                 'description' => 'Is competition started (1), paused (2), or stopped (0).',
-                'type' => 'int',
-                'unsigned' => TRUE,
-                'not null' => TRUE,
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
             ),
         ),
 
@@ -89,8 +70,89 @@ function _codepsu_get_schema() {
 }
 
 
+function _codepsu_get_problems_schema() {
+    return array(
+        'description' => 'CodePSU Problems',
+        'fields' => array(
+            'pid' => array(
+                'description' => 'Problem ID; primary key',
+                'type'        => 'serial',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+            'nid' => array(
+                'description' => 'nid of the competition this problem belongs to.',
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+            'name' => array(
+                'description' => 'Names of the problem.',
+                'type'        => 'varchar',
+                'length'      => 2048,
+                'not null'    => TRUE,
+                'default'     => '',
+            ),
+            'points' => array(
+                'description' => 'Point value of the problem.',
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+        ),
+
+        'primary key' => array('pid'),
+    );
+}
+
+
+function _codepsu_get_teams_schema() {
+    return array(
+        'description' => 'CodePSU Teams',
+        'fields' => array(
+            'tid' => array(
+                'description' => 'Team ID; primary key',
+                'type'        => 'serial',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+            'nid' => array(
+                'description' => 'nid of the competition this team belongs to.',
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+            'name' => array(
+                'description' => 'Names of the team.',
+                'type'        => 'varchar',
+                'length'      => 1024,
+                'not null'    => TRUE,
+                'default'     => '',
+            ),
+            'tier' => array(
+                'description' => 'The tier the team is in.',
+                'type'        => 'int',
+                'unsigned'    => TRUE,
+                'not null'    => TRUE,
+            ),
+        ),
+
+        'primary key' => array('tid'),
+    );
+}
+
+
 function codepsu_install() {
     // Build the native execution program
     chdir(drupal_get_path('module', 'codepsu'));
     exec('make &');
+}
+
+
+function codepsu_uninstall() {
+    $nids = db_query('SELECT nid FROM {codepsu_competitions}');
+
+    foreach($nids as $nid) {
+        node_delete($nid);
+    }
 }

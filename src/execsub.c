@@ -119,6 +119,11 @@ int main(int argc, char **argv) {
         usleep(1000);
     }
 
+    // Write a newline to the output file in case the submission did not
+    FILE *output = fopen("output.txt", "a");
+    fprintf(output, "\n");
+    fclose(output);
+
     // If the child didn't return in the time limit, sigkill it
     if(!returned) {
         kill(pid, SIGKILL);
@@ -126,9 +131,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s: Time limit execeeded.\n", prog);
     // If it did return, run a diff on the outputs
     } else {
-        char cmd[BUFFER] = "diff --strip-trailing-cr --ignore-blank-lines ";
-        strncat(cmd, output_path, strlen(output_path));
-        strncat(cmd, " output.txt", 11);
+        char cmd[BUFFER];
+        sprintf(cmd, "diff --strip-trailing-cr --ignore-blank-lines %s output.txt", output_path);
 
         FILE *diff = popen(cmd, "r");
         FILE *diff_output = fopen("diff.txt", "w");
@@ -138,6 +142,7 @@ int main(int argc, char **argv) {
         while(fgets(buf, BUFFER, diff) != NULL) {
             fprintf(diff_output, "%s\n", buf);
         }
+
         int exit_code = WEXITSTATUS(pclose(diff));
         fclose(diff_output);
 

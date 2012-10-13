@@ -121,27 +121,49 @@ function codepsu_load(&$nodes) {
   }
 
   // Load each nid from the db
-  $result = db_query('SELECT * FROM {codepsu} WHERE nid IN (:nids)', array(':nids' => $nids));
+  $result   = db_query('SELECT * FROM {codepsu_competitions} WHERE nid IN (:nids)', array(':nids' => $nids));
+  $problems = db_query('SELECT * FROM {codepsu_problems} WHERE nid IN (:nids)', array(':nids' => $nids));
+  $teams    = db_query('SELECT * FROM {codepsu_teams} WHERE nid IN (:nids)', array(':nids' => $nids));
   
-  // Copy the fields from the db to the node
+  // Copy the fields from the db result to the node
   foreach($result as $record) {
     $nodes[$record->nid]->foreword   = $record->foreword;
     $nodes[$record->nid]->semester   = $record->semester;
     $nodes[$record->nid]->time_limit = $record->time_limit;
-    $nodes[$record->nid]->teams      = $record->teams;
-    $nodes[$record->nid]->probs      = $record->probs;
-    $nodes[$record->nid]->points     = $record->points;
     $nodes[$record->nid]->quest_nid  = $record->quest_nid;
     $nodes[$record->nid]->_path      = $record->_path;
     $nodes[$record->nid]->start_time = $record->start_time;
     $nodes[$record->nid]->running    = $record->running;
   }
+
+  foreach($problems as $problem) {
+    $nodes[$record->nid]->pids[]   = $problem->pid;
+    $nodes[$record->nid]->probs[]  = $problem->name;
+    $nodes[$record->nid]->points[] = $problem->points;
+  }
+
+  foreach($teams as $team) {
+    $nodes[$record->nid]->tids[]  = $team->tid;
+    $nodes[$record->nid]->teams[] = $team->name;
+    $nodes[$record->nid]->tiers[] = $team->tier;
+  }
 }
 
 
 function codepsu_form($node, &$form_state) {
+  // If the form is being rebuilt, re-load the node since data may have changed
+  if($form_state['rebuild'])
+    $node = node_load($node->nid);
+
+  // If the competition is running, show a warning that the form probably shouldn't be edited
+  if($node->running) {
+    drupal_set_message(t('WARNING: The competition is started. It\'s very dangerous to edit a live competition. Either stop the competition first or make sure
+                          you know exactly what you\'re doing!'), 'error');
+  }
+
   $form = array();
   $form['#cache'] = TRUE;
+  $form['#node']  = $node; // Keep the node along for the ride
 
   // If new node disable comments and promotion to front page by default
   if(empty($node->nid)) {
@@ -149,24 +171,12 @@ function codepsu_form($node, &$form_state) {
     $node->promote = 0;
   }
 
-  // Explode the teams and problems
-  $teams  = array();
-  $probs  = array();
-  if(isset($node->teams) && isset($node->probs) && isset($node->points)) {
-    $teams  = explode('~', $node->teams);
-    $probs  = explode('~', $node->probs);
-    $points = explode('~', $node->points);
-    unset($teams[count($teams)-1]);
-    unset($probs[count($probs)-1]);
-    unset($points[count($points)-1]);
-  }
-
   // Get the number of teams and problems (and init if necessary)
   if(!isset($form_state['num_teams'])) {
-    $form_state['num_teams'] = (count($teams) == 0) ? 1 : count($teams);
+    $form_state['num_teams'] = (isset($node->teams) == 0) ? 1 : count($node->teams);
   }
   if(!isset($form_state['num_probs'])) {
-    $form_state['num_probs'] = (count($probs) == 0) ? 1 : count($probs);
+    $form_state['num_probs'] = (isset($node->probs) == 0) ? 1 : count($node->probs);
   }
 
   $num_teams = $form_state['num_teams'];
@@ -225,17 +235,54 @@ function codepsu_form($node, &$form_state) {
 
   for($i=1; $i<=$num_teams; $i++) {
     $form['teams']['teams_wrapper']['team' . $i] = array(
+      '#type'        => 'fieldset',
+      '#title'       => t('Team ' . $i),
+      '#collapsible' => TRUE,
+      '#collapsed'   => TRUE,
+      '#weight'      => $i,
+    );
+
+    $form['teams']['teams_wrapper']['team' . $i]['team_name' . $i] = array(
       '#type'          => 'textfield',
-      '#title'         => t('Team ' . $i . ':'),
-      '#default_value' => ((isset($teams[$i-1])) ? $teams[$i-1] : ''),
-      '#required'      => (($i == 1) ? TRUE : FALSE),
-      '#weight'        => $i-1,
+      '#title'         => t('Name:'),
+      '#default_value' => ((isset($node->teams[$i-1])) ? $node->teams[$i-1] : ''),
+      '#required'      => TRUE,
+      '#weight'        => 0,
+    );
+
+    $form['teams']['teams_wrapper']['team' . $i]['tier' . $i] = array(
+      '#type'          => 'select',
+      '#title'         => t('Tier:'),
+      '#default_value' => ((isset($node->tiers[$i-1])) ? $node->tiers[$i-1] : ''),
+      '#required'      => TRUE,
+      '#weight'        => 1,
+      '#options'       => array(
+        0 => 'Select a tier',
+        1 => 'Intermediate',
+        2 => 'Advanced',
+      ),
+    );
+
+    $form['teams']['teams_wrapper']['team' . $i]['remove' . $i] = array(
+      '#type'                    => 'submit',
+      '#value'                   => 'Remove Team',
+      '#weight'                  => 2,
+      '#submit'                  => array('codepsu_remove_team_submit'),
+      '#limit_validation_errors' => array(),
+      '#tid'                     => (isset($node->tids[$i-1]) ? $node->tids[$i-1] : ''),
+      '#ajax' => array(
+        'callback' => 'codepsu_ajax_teams_callback',
+        'wrapper'  => 'teams-wrapper',
+        'method'   => 'replace',
+        'effect'   => 'fade',
+      ),
     );
   }
 
   $form['teams']['add'] = array(
     '#type'                    => 'submit',
-    '#value'                   => 'Add another team',
+    '#value'                   => t('Add another team'),
+    '#description'             => t('Changes are immediate.'),
     '#weight'                  => 1,
     '#submit'                  => array('codepsu_add_team_submit'),
     '#limit_validation_errors' => array(),
@@ -296,18 +343,18 @@ function codepsu_form($node, &$form_state) {
       '#weight'      => $i,
     );
 
-    $form['probs']['probs_wrapper']['prob' . $i]['name' . $i] = array(
+    $form['probs']['probs_wrapper']['prob' . $i]['prob_name' . $i] = array(
       '#type'          => 'textfield',
       '#title'         => t('Problem ' . $i . ' name:'),
-      '#default_value' => ((isset($probs[$i-1])) ? $probs[$i-1] : ''),
-      '#required'      => (($i == 1) ? TRUE : FALSE),
+      '#default_value' => ((isset($node->probs[$i-1])) ? $node->probs[$i-1] : ''),
+      '#required'      => TRUE,
       '#weight'        => 0,
     );
     $form['probs']['probs_wrapper']['prob' . $i]['points' . $i] = array(
       '#type'          => 'textfield',
       '#title'         => t('Problem ' . $i . ' points:'),
-      '#default_value' => ((isset($points[$i-1])) ? $points[$i-1] : '1'),
-      '#required'      => (($i == 1) ? TRUE : FALSE),
+      '#default_value' => ((isset($node->points[$i-1])) ? $node->points[$i-1] : '1'),
+      '#required'      => TRUE,
       '#weight'        => 1,
     );
     $form['probs']['probs_wrapper']['prob' . $i]['time' . $i] = array(
@@ -315,28 +362,45 @@ function codepsu_form($node, &$form_state) {
       '#title'         => t('Problem ' . $i . ' max time:'),
       '#description'   => t('The maximum allowable execution time for this problem in seconds.'),
       '#default_value' => $time,
-      '#required'      => (($i == 1) ? TRUE : FALSE),
+      '#required'      => TRUE,
       '#weight'        => 2,
     );
     $form['probs']['probs_wrapper']['prob' . $i]['input' . $i] = array(
       '#type'          => 'textarea',
       '#title'         => t('Problem ' . $i . ' input:'),
       '#default_value' => $input,
-      '#required'      => (($i == 1) ? TRUE : FALSE),
+      '#required'      => TRUE,
       '#weight'        => 3,
     );
     $form['probs']['probs_wrapper']['prob' . $i]['output' . $i] = array(
       '#type'          => 'textarea',
       '#title'         => t('Problem ' . $i . ' output:'),
       '#default_value' => $output,
-      '#required'      => (($i == 1) ? TRUE : FALSE),
+      '#required'      => TRUE,
       '#weight'        => 4,
+    );
+
+    $form['probs']['probs_wrapper']['prob' . $i]['remove' . $i] = array(
+      '#type'                    => 'submit',
+      '#value'                   => t('Remove Problem'),
+      '#description'             => t('Changes are immediate.'),
+      '#weight'                  => 5,
+      '#submit'                  => array('codepsu_remove_prob_submit'),
+      '#limit_validation_errors' => array(),
+      '#pid'                     => (isset($node->pids[$i-1]) ? $node->pids[$i-1] : ''),
+      '#num'                     => $i,
+      '#ajax' => array(
+        'callback' => 'codepsu_ajax_probs_callback',
+        'wrapper'  => 'probs-wrapper',
+        'method'   => 'replace',
+        'effect'   => 'fade',
+      ),
     );
   }
 
   $form['probs']['add'] = array(
     '#type'                    => 'submit',
-    '#value'                   => 'Add another problem',
+    '#value'                   => t('Add another problem'),
     '#weight'                  => 1,
     '#submit'                  => array('codepsu_add_prob_submit'),
     '#limit_validation_errors' => array(),
@@ -346,11 +410,6 @@ function codepsu_form($node, &$form_state) {
       'method'   => 'replace',
       'effect'   => 'fade',
     ),
-  );
-
-  // Points placeholder
-  $form['points'] = array(
-    '#type'  => 'value',
   );
 
   // Question node placeholder
@@ -387,6 +446,18 @@ function codepsu_ajax_files_callback($form, $form_state) {
 
 function codepsu_validate($node, $form, &$form_state) {
   $err = FALSE;
+
+  // Check for at least one team and one problem
+  if($form_state['num_teams'] == 0) {
+    form_set_error('', t('There must be at least one team.'));
+    $err = TRUE;
+  }
+
+  if($form_state['num_probs'] == 0) {
+    form_set_error('', t('There must be at least one problem.'));
+    $err = TRUE;
+  }
+
   // Check for empty title
   if(empty($form_state['values']['title'])) {
     form_set_error('title', t('Title field is required.'));
@@ -399,64 +470,22 @@ function codepsu_validate($node, $form, &$form_state) {
     $err = TRUE;
   }
 
-  // Check for at least one team
-  if(empty($form_state['values']['team1'])) {
-    form_set_error('', t('At least one team must be entered.'));
-    $err = TRUE;
-  }
-
-  // Check for at least one problem
-  if(empty($form_state['values']['name1'])) {
-    form_set_error('name1', t('At least one problem name must be entered.'));
-    $err = TRUE;
-  }
-  if(empty($form_state['values']['points1'])) {
-    form_set_error('points1', t('At least one problem points value must be entered.'));
-    $err = TRUE;
-  }
-  if(empty($form_state['values']['input1'])) {
-    form_set_error('input1', t('At least one problem input must be entered.'));
-    $err = TRUE;
-  }
-  if(empty($form_state['values']['output1'])) {
-    form_set_error('output1', t('At least one problem output must be entered.'));
-    $err = TRUE;
-  }
-  if(empty($form_state['values']['time1'])) {
-    form_set_error('time1', t('At least one problem max execution time must be entered.'));
-    $err = TRUE;
-  }
-
-  if($err) return;
-
-  // Construct the teams and problems list for insertion into the db
-  $teams = '';
+  // Check that each team has a name and tier selected
   for($i=1; $i<=$form_state['num_teams']; $i++) {
-    // Check each team name for a '~'
-    if(strpos($form_state['values']['team' . $i], '~') !== FALSE) {
-      form_set_error('team' . $i, '\'~\'\'s are not valid characters.');
+    if(empty($form_state['values']['team_name' . $i]) || empty($form_state['values']['tier' . $i])) {
+      form_set_error('', t('All fields in team ' . $i . ' must be filled in.'));
       $err = TRUE;
       continue;
     }
-    $teams .= $form_state['values']['team' . $i] . '~';
   }
 
-  $probs  = '';
-  $points = '';
+  // Validate all problems
   for($i=1; $i<=$form_state['num_probs']; $i++) {
     // Check that a problem's name, points, input, output and time are filled in
-    if(empty($form_state['values']['name' . $i])   || empty($form_state['values']['points' . $i]) ||
-       empty($form_state['values']['input' . $i])  ||  empty($form_state['values']['output' . $i]) || 
+    if(empty($form_state['values']['prob_name' . $i]) || $form_state['values']['points' . $i] == ''   ||
+       empty($form_state['values']['input' . $i])     ||  empty($form_state['values']['output' . $i]) || 
        empty($form_state['values']['time' . $i])) {
-      form_set_error('', t('All fields in problem ' . $i . ' must be filled in or empty.'));
-      $err = TRUE;
-      continue;
-    // Check each field for a '~'
-    } else if(strpos($form_state['values']['name' . $i], '~')   !== FALSE ||
-              strpos($form_state['values']['input' . $i], '~')  !== FALSE ||
-              strpos($form_state['values']['output' . $i], '~') !== FALSE ||
-              strpos($form_state['values']['time' . $i], '~')   !== FALSE) {
-      form_set_error('prob' . $i, '\'~\'\'s are not valid characters.');
+      form_set_error('', t('All fields in problem ' . $i . ' must be filled in.'));
       $err = TRUE;
       continue;
     // Check that the times and points are numeric
@@ -466,38 +495,58 @@ function codepsu_validate($node, $form, &$form_state) {
     } else if(!is_numeric($form_state['values']['points' . $i])) {
       form_set_error('points' . $i, 'Points field must be numeric.');
       $err = TRUE;
-    } else {
-      $probs  .= $form_state['values']['name' . $i]   . '~';
-      $points .= $form_state['values']['points' . $i]   . '~';
     }
   }
-
-  if($err) return;
-
-  // Update the form with the teams, problems, and points lists
-  form_set_value($form['teams'], $teams, $form_state);
-  form_set_value($form['probs'], $probs, $form_state);
-  form_set_value($form['points'], $points, $form_state);
 }
 
 
 function codepsu_add_team_submit($form, &$form_state) {
-  if($form_state['num_teams'] >= 99) {
-    form_set_error('add', t('The maximum number of teams is 99'));
-    return;
-  }
   $form_state['num_teams']++;
   $form_state['rebuild'] = TRUE;
 }
 
-function codepsu_add_prob_submit($form, &$form_state) {
-  if($form_state['num_probs'] >= 99) {
-    form_set_error('add', t('The maximum number of problems is 99'));
+function codepsu_remove_team_submit($form, &$form_state) {
+  $form_state['rebuild'] = TRUE;
+
+  if($form_state['num_teams'] == 1) {
+    drupal_set_message(t('There must be at least one team.'), 'error');
     return;
   }
 
+  // Delete the team from the database
+  if(!empty($form_state['clicked_button']['#tid'])) {
+    db_delete('codepsu_teams')->condition('tid', $form_state['clicked_button']['#tid'])->execute();
+  }
+
+  drupal_set_message(t('Team removed.'));
+
+  $form_state['num_teams']--;
+}
+
+function codepsu_add_prob_submit($form, &$form_state) {
   $form_state['num_probs']++;
   $form_state['rebuild'] = TRUE;
+}
+
+function codepsu_remove_prob_submit($form, &$form_state) {
+  $form_state['rebuild'] = TRUE;
+
+  if($form_state['num_probs'] == 1) {
+    drupal_set_message(t('There must be at least one problem.'), 'error');
+    return;
+  }
+
+  // Delete the problem from the database and IO and time files
+  if(!empty($form_state['clicked_button']['#pid'])) {
+    db_delete('codepsu_problems')->condition('pid', $form_state['clicked_button']['#pid'])->execute();
+    unlink($form['complete_form']['_path']['#value'] . '/input/prob_'  . $form_state['clicked_button']['#num'] . '.txt');
+    unlink($form['complete_form']['_path']['#value'] . '/output/prob_' . $form_state['clicked_button']['#num'] . '.txt');
+    unlink($form['complete_form']['_path']['#value'] . '/times/prob_'  . $form_state['clicked_button']['#num'] . '.txt');
+  }
+
+  drupal_set_message(t('Problem removed.'));
+
+  $form_state['num_probs']--;
 }
 
 function codepsu_add_file_submit($form, &$form_state) {
@@ -524,8 +573,9 @@ function codepsu_form_submit($form, &$form_state) {
       $path = $new_path;
     }
 
-      // Make the subdirs (will check if they exist first)
+    // Make the subdirs (will check if they exist first)
     _codepsu_make_competition_directory($path, $form_state['num_teams']);
+
   // If the old path and new path are different, rename the old path to the new path
   // (this will happen if the semester changed)
   } else if(!empty($form['_path']['#value']) && $form['_path']['#value'] != $path) {
@@ -548,12 +598,32 @@ function codepsu_form_submit($form, &$form_state) {
     fclose($input);
     fclose($output);
     fclose($time);
+
+    unset($input);
+    unset($output);
+    unset($time);
+
+    // Convert the Windows line endings Drupal likes to use to Unix line endings
+    $input  = file_get_contents($path . '/input/prob_' . $i . '.txt');
+    $output = file_get_contents($path . '/output/prob_' . $i . '.txt');
+    $time   = file_get_contents($path . '/times/prob_' . $i . '.txt');
+
+    $input  = str_replace("\r", '', $input);
+    $output = str_replace("\r", '', $output);
+    $time   = str_replace("\r", '', $time);
+
+    file_put_contents($path . '/input/prob_' . $i . '.txt', $input);
+    file_put_contents($path . '/output/prob_' . $i . '.txt', $output);
+    file_put_contents($path . '/times/prob_' . $i . '.txt', $time);
   }
+
+  // If a team was added, create a directory for it
+  _codepsu_create_team_dirs($path, $form_state['num_teams'], 0774);
 
   // Write empty results files if they don't already exist
   for($i=1; $i<=$form_state['num_teams']; $i++) {
     if(!file_exists($path . '/results/team_' . $i . '.htm')) {
-      _codepsu_write_results_page($path, $i, 0, 0, '', 1);
+      _codepsu_write_results_page($path, $i, 0, 0, '', 1, '');
     }
   }
 
@@ -588,11 +658,65 @@ function codepsu_insert($node) {
   $node->start_time = 0;
   $node->running    = 0;
 
-  drupal_write_record('codepsu', $node);
+  drupal_write_record('codepsu_competitions', $node);
+
+  // Insert the problems and teams into the db
+  _codepsu_insert_teams_probs($node);
 }
 
 function codepsu_update($node) {
-  drupal_write_record('codepsu', $node, 'nid');
+  drupal_write_record('codepsu_competitions', $node, 'nid');
+
+  // Insert the problems and teams into the db
+  _codepsu_insert_teams_probs($node);
+}
+
+function _codepsu_insert_teams_probs($node) {
+  $prob = 1;
+  $name   = 'prob_name' . $prob;
+  $points = 'points' . $prob;
+  
+  do {
+    $insert_obj->nid    = $node->nid;
+    $insert_obj->name   = $node->$name;
+    $insert_obj->points = $node->$points;
+
+    if(isset($node->pids[$prob-1])) {
+      $insert_obj->pid = $node->pids[$prob-1];
+      drupal_write_record('codepsu_problems', $insert_obj, 'pid');
+    } else {
+      drupal_write_record('codepsu_problems', $insert_obj);
+    }
+
+    unset($insert_obj);
+
+    $prob++;
+    $name   = 'prob_name' . $prob;
+    $points = 'points' . $prob;
+  } while(isset($node->$name));
+
+  $team = 1;
+  $name = 'team_name' . $team;
+  $tier = 'tier' . $team;
+  
+  do {
+    $insert_obj->nid  = $node->nid;
+    $insert_obj->name = $node->$name;
+    $insert_obj->tier = $node->$tier;
+
+    if(isset($node->tids[$team-1])) {
+      $insert_obj->tid = $node->tids[$team-1];
+      drupal_write_record('codepsu_teams', $insert_obj, 'tid');
+    } else {
+      drupal_write_record('codepsu_teams', $insert_obj);
+    }
+    
+    unset($insert_obj);
+
+    $team++;
+    $name = 'team_name' . $team;
+    $tier = 'tier' . $team;
+  } while(isset($node->$name));
 }
 
 
@@ -634,18 +758,11 @@ function codepsu_get_view_form($form, &$form_state, $form_id, $args) {
     '#weight'  => 0,
   );
 
-  // Explode the teams and problems arrays, remove the empty end index, 
-  // and append the message to the front of the array
-  $teams = explode('~', $node->teams);
-  $probs = explode('~', $node->probs);
-  unset($teams[count($teams)-1]);
-  unset($probs[count($probs)-1]);
-
   // Construct the teams array
-  $num_teams = count($teams);
+  $num_teams = count($node->teams);
   $teams_list = array(0 => 'Select a team');
   for($i=0; $i<$num_teams; $i++) {
-    $teams_list[] = ($i+1) . '.) ' . $teams[$i];
+    $teams_list[] = ($i+1) . '.) ' . $node->teams[$i];
   }
 
   // Team Select
@@ -656,10 +773,10 @@ function codepsu_get_view_form($form, &$form_state, $form_id, $args) {
   );
 
   // Construct the problems array
-  $num_probs = count($probs);
+  $num_probs = count($node->probs);
   $probs_list = array(0 => 'Select a problem');
   for($i=0; $i<$num_probs; $i++) {
-    $probs_list[] = 'Problem ' . ($i+1) . ' - ' . $probs[$i];
+    $probs_list[] = 'Problem ' . ($i+1) . ' - ' . $node->probs[$i];
   }
 
   // Problem Select
@@ -771,8 +888,8 @@ function codepsu_view_form_validate($form, &$form_state) {
 
   // Check the IP address of the team
   if(!_codepsu_is_valid_ip($_SERVER["REMOTE_ADDR"], $form['_path']['#value'], $form_state['values']['team'])) {
-    form_set_error(t('ERROR: your IP (' . $_SERVER["REMOTE_ADDR"] . ') does not match the IP we have stored for you. \
-                       Your submission was NOT recieved. See a judge if you think you are receiving this message in error.'), 'error');
+    form_set_error('', t('ERROR: your IP (' . $_SERVER["REMOTE_ADDR"] . ') does not match the IP we have stored for you.
+                       Your submission was NOT recieved. See a judge if you think you are receiving this message in error.'));
     return;
   }
 
@@ -803,6 +920,7 @@ function codepsu_view_form_submit($form, &$form_state) {
 
   // The language of the submission
   $lang = 'none';
+  $was_source_uploaded = FALSE;
 
   // Upload each of the files
   for($i=1; $i<=$form_state['num_files']; $i++) {
@@ -823,12 +941,21 @@ function codepsu_view_form_submit($form, &$form_state) {
 
       // Check/determine language (C, C++, Java)
       $lang = _codepsu_check_lang($file, $lang);
+      if($lang == 'c' || $lang == 'cpp' || $lang == 'java') $was_source_uploaded = TRUE;
+
       if($lang == 'err') {
         drupal_set_message(t('ERROR: Multiple languages detected. Make sure all files have consistent file types and are of the same language.'), 'error');
-          _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'MULTIPLE LANAGUES');
+        _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'MULTIPLE LANAGUES');
         return;
-      }
+      } 
     }
+  }
+
+  // Check if only header files were uploaded
+  if(!$was_source_uploaded) {
+     drupal_set_message(t('ERROR: Only header files were detected. You must upload source files as well.'), 'error');
+     _codepsu_update_sub_log($path, $team, $prob, $rev, $ip, 'ONLY HEADER FILES');
+     return;
   }
 
   // If the language is still 'none', no source files were uploaded
@@ -886,7 +1013,8 @@ function codepsu_view_form_submit($form, &$form_state) {
     _codepsu_exec_submission($path, $team, $prob, $rev, $lang);
   } else {
     drupal_set_message('WARNING: Your solution failed to compile. The judges will try to compile it manually in the event the auto-compile script reported a false positive, but this isn\'t likely. Re-check your solution in the meantime.', 'error');
-    _codepsu_write_results_page($path, $team, $prob, $rev, 'Failed to compile. Waiting for judge confirmation of compile failure...', 0);
+    _codepsu_write_results_page($path, $team, $prob, $rev, 'Failed to compile. Waiting for judge confirmation of compile failure...', 0, 
+                                file_get_contents($path . '/submissions/team_' . $team . '/prob_' . $prob . '/rev_' . $rev . '/compile.log'));
   }
 }
 
@@ -966,13 +1094,17 @@ function _codepsu_make_competition_directory($path, $num_teams) {
   }
 
   // Make a directory for each team in the submissions dir
+  _codepsu_create_team_dirs($path, $num_teams, $perm);
+}
+
+
+function _codepsu_create_team_dirs($path, $num_teams, $perm) {
   for($i=1; $i<=$num_teams; $i++) {
     if(!is_dir($path . '/submissions/team_' . $i)) {
       mkdir($path . '/submissions/team_' . $i, $perm);
     }
   }
 }
-
 
 function _codepsu_create_revision_dir($path, $team, $prob) {
   // Find the highest revision dir
@@ -995,9 +1127,10 @@ function _codepsu_create_revision_dir($path, $team, $prob) {
 
 function _codepsu_check_lang($file, $lang) {
   $exp_file = explode('.', $file->filename);
+  $extension = strtolower($exp_file[1]);
   // Determine the language
   if($lang == 'none') {
-    switch($exp_file[1]) {
+    switch($extension) {
       case 'c':
         return 'c';
         break;
@@ -1015,8 +1148,10 @@ function _codepsu_check_lang($file, $lang) {
         return 'err';
     }
   // Check that the file ext matches the language
-  } else if($exp_file[1] != $lang) {
+  } else if($extension != 'h' && $lang != 'h' && $extension != $lang) {
     return 'err';
+  } else {
+    return $lang;
   }
 }
 
@@ -1048,7 +1183,7 @@ function _codepsu_verify_code($path, $team, $prob, $rev, $lang, $files) {
             return 2;
           } else if(strpos($line, 'execl(') !== FALSE  || strpos($line, 'execv(') !== FALSE ||
                     strpos($line, 'execle(') !== FALSE || strpos($line, 'execve(') !== FALSE ||
-                    strpos($line, 'execlp(') !== FALSE || strpos($line, 'exevp(') !== FALSE) {
+                    strpos($line, 'execlp(') !== FALSE || strpos($line, 'execvp(') !== FALSE) {
             return 3;
           } else if(strpos($line, 'fork(') !== FALSE) {
             return 4;
@@ -1100,7 +1235,7 @@ function _codepsu_create_makefile($path, $team, $prob, $rev, $lang) {
 
   // All rule
   if($lang == 'c' || $lang == 'cpp') {
-    fwrite($makefile, "all:\n\t\$(CC) -o \$(BINARY) \$(SRC)\n\n");
+    fwrite($makefile, "all:\n\t\$(CC) -O2 -Wall -Wextra -o \$(BINARY) \$(SRC) -lm\n\n");
   } else {
     fwrite($makefile, "all:\n\t\$(CC) \$(SRC)\n\n");
   }
@@ -1195,7 +1330,7 @@ function _codepsu_is_valid_ip($ip, $path, $team) {
     $ip_file = fopen($path . '/submissions/team_' . $team . '/ip.txt', 'w');
     fwrite($ip_file, $ip);
     fclose($ip_file);
-    return True;
+    return TRUE;
   // Else, compare the IP in the file with the given IP
   } else {
     $ip_file = fopen($path . '/submissions/team_' . $team . '/ip.txt', 'r');
@@ -1225,7 +1360,7 @@ function _codepsu_is_prob_solved($path, $team, $prob) {
 }
 
 
-function _codepsu_write_results_page($path, $team, $prob, $rev, $message, $init) {
+function _codepsu_write_results_page($path, $team, $prob, $rev, $message, $init, $compile_output) {
   // Read the template, writing each line to the result file and replace the message line
   // when we get to it
   $template = fopen($path . '/results/submission-result.htm', 'r');
@@ -1238,6 +1373,10 @@ function _codepsu_write_results_page($path, $team, $prob, $rev, $message, $init)
             fwrite($result, 'Team ' . $team . ": No submissions yet.\n");
           } else {
             fwrite($result, 'Team ' . $team . ': Problem ' . $prob . ' (submission ' . $rev . '): ' . $message . "\n");
+
+            if(!empty($compile_output)) {
+              fwrite($result, '<br /><br /><pre>' . $compile_output . '</pre>');
+            }
           }
       } else {
           fwrite($result, $line);
@@ -1300,9 +1439,11 @@ function codepsu_get_manage_form($form, &$form_state, $form_id, $args) {
     case 'main':
       return _codepsu_get_main_manage_form($form, $form_state, $nid);
     case 'confirm':
-      return _codepsu_get_confirm_solution_form($form, $form_state, $nid, $form_state['#team'], $form_state['#prob']);
+      return _codepsu_get_confirm_solution_form($form, $form_state, $nid);
     case 'compile':
-      return _codepsu_get_confirm_compile_form($form, $form_state, $nid, $form_state['#team'], $form_state['#prob'], $form_state['#rev']);
+      return _codepsu_get_confirm_compile_form($form, $form_state, $nid);
+    case 'incorrect':
+      return _codepsu_get_incorrect_solution_form($form, $form_state, $nid);
     default:
       return $form;
   }
@@ -1392,6 +1533,7 @@ function _codepsu_get_main_manage_form($form, &$form_state, $nid) {
   $compile_queue = array();
   $compile_queue_orig = array();
   while(($line = fgets($sub_log)) !== FALSE) {
+    // Check if the line is a failed compile that has not already been marked as confirmed or a manual case
     if(strpos($line, 'COMPILE') !== FALSE && strpos($line, 'CONFIRMED') === FALSE && strpos($line, 'MANUAL') === FALSE) {
       $team = (int)substr($line, strpos($line, 'Team ')+5, 2);
       $prob = (int)substr($line, strpos($line, 'problem ')+8, 2);
@@ -1423,7 +1565,7 @@ function _codepsu_get_main_manage_form($form, &$form_state, $nid) {
 
   $form['compile_submit'] = array(
     '#type'     => 'submit',
-    '#value'    => 'Confirm Compile',
+    '#value'    => t('Confirm Compile'),
     '#disabled' => $compile_queue_empty,
     '#weight'   => 8,
   );
@@ -1434,38 +1576,84 @@ function _codepsu_get_main_manage_form($form, &$form_state, $nid) {
     '#weight' => 9,
   );
 
+
+  // Read the exec log
+  $exec_log = fopen($node->_path . '/exec.log', 'r');
+  $incorrect_queue = array();
+  $incorrect_queue_orig = array();
+  while(($line = fgets($exec_log)) !== FALSE) {
+    if(strpos($line, 'Incorrect output') !== FALSE && strpos($line, 'MARKED AS CORRECT') === FALSE) {
+      $team = (int)substr($line, strpos($line, 'Team ')+5, 2);
+      $prob = (int)substr($line, strpos($line, 'Problem ')+8, 2);
+      $rev  = (int)substr($line, strpos($line, 'revision ')+9, 2);
+      $incorrect_queue[] = 'Team ' . $team . ', Problem ' . $prob . ' (revision ' . $rev . ')';
+      // Keep a list of the original lines for later possibly adding them to the score log
+      $incorrect_queue_orig[] = $line;
+    }
+  }
+  fclose($exec_log);
+
+  // Check if the queue is empty
+  $incorrect_queue_empty = FALSE;
+  if(!count($incorrect_queue)) {
+    $incorrect_queue[] = t('No submissions in queue.');
+    $incorrect_queue_empty = TRUE;
+  }
+
+  $form['incorrect_queue'] = array(
+    '#type'      => 'select',
+    '#title'     => t('Incorrect Submissions:'),
+    '#multiple'  => TRUE,
+    '#options'   => $incorrect_queue,
+    '#orig'      => $incorrect_queue_orig,
+    '#disabled'  => $incorrect_queue_empty,
+    '#size'      => 10,
+    '#weight'    => 10,
+  );
+
+  $form['incorrect_submit'] = array(
+    '#type'     => 'submit',
+    '#value'    => t('View Submission'),
+    '#disabled' => $incorrect_queue_empty,
+    '#weight'   => 11,
+  );
+
+  $form['spacer4'] = array(
+    '#type'   => 'item',
+    '#markup' => '<br />',
+    '#weight' => 12,
+  );
+
   // Construct the teams list
-  $teams = explode('~', $node->teams);
-  unset($teams[count($teams)-1]);
-  $num_teams = count($teams);
+  $num_teams = count($node->teams);
   $teams_list = array(0 => 'Select a team');
   for($i=0; $i<$num_teams; $i++) {
-    $teams_list[] = ($i+1) . '.) ' . $teams[$i];
+    $teams_list[] = ($i+1) . '.) ' . $node->teams[$i];
   }
 
   $form['ip_list'] = array(
     '#type'      => 'select',
     '#title'     => t('Clear IP Address:'),
     '#options'   => $teams_list,
-    '#weight'    => 10,
+    '#weight'    => 13,
   );
 
   $form['ip_submit'] = array(
     '#type'   => 'submit',
     '#value'  => 'Clear IP Address',
-    '#weight' => 11,
+    '#weight' => 14,
   );
 
   $form['warning'] = array(
     '#type'   => 'item',
     '#markup' => '<br /><br /><br /><strong>WARNING: Reset DELETES ALL submissions and logs. Don\'t click it unless you\'re sure!</strong>',
-    '#weight' => 12,
+    '#weight' => 15,
   );
 
   $form['reset'] = array(
     '#type'   => 'submit',
     '#value'  => t('Reset Competition'),
-    '#weight' => 13,
+    '#weight' => 16,
   );
 
   // Placeholder for the running state of the competition
@@ -1478,7 +1666,7 @@ function _codepsu_get_main_manage_form($form, &$form_state, $nid) {
 }
 
 
-function _codepsu_get_confirm_solution_form($form, &$form_state, $nid, $team, $prob) {
+function _codepsu_get_confirm_solution_form($form, &$form_state, $nid) {
   $form = array();
 
   $node = node_load($nid);
@@ -1527,19 +1715,19 @@ function _codepsu_get_confirm_solution_form($form, &$form_state, $nid, $team, $p
 
   $form['confirm_sol'] = array(
     '#type'   => 'submit',
-    '#value'  => 'Confirm Solution',
+    '#value'  => t('Confirm Solution'),
     '#weight' => 4,
   );
 
   $form['false_positive'] = array(
     '#type'   => 'submit',
-    '#value'  => 'False Positive',
+    '#value'  => t('False Positive'),
     '#weight' => 5,
   );
 
   $form['back'] = array(
     '#type'   => 'submit',
-    '#value'  => 'Back',
+    '#value'  => t('Back'),
     '#weight' => 6,
   );
 
@@ -1547,14 +1735,14 @@ function _codepsu_get_confirm_solution_form($form, &$form_state, $nid, $team, $p
 }
 
 
-function _codepsu_get_confirm_compile_form($form, &$form_state, $nid, $team, $prob, $rev) {
+function _codepsu_get_confirm_compile_form($form, &$form_state, $nid) {
   $form = array();
 
   $node = node_load($nid);
 
   $form['output'] = array(
     '#type'          => 'textarea',
-    '#title'         => 'Compile Output:',
+    '#title'         => t('Compile Output:'),
     '#disabled'      => TRUE,
     '#weight'        => 0,
     '#default_value' => file_get_contents($node->_path . '/submissions/team_' . 
@@ -1570,20 +1758,76 @@ function _codepsu_get_confirm_compile_form($form, &$form_state, $nid, $team, $pr
 
   $form['confirm_fail'] = array(
     '#type'   => 'submit',
-    '#value'  => 'Confirm compile failure',
+    '#value'  => t('Confirm compile failure'),
     '#weight' => 2,
   );
 
   $form['manual_case'] = array(
     '#type'   => 'submit',
-    '#value'  => 'Mark as manual case',
+    '#value'  => t('Mark as manual case'),
     '#weight' => 3,
   );
 
   $form['back'] = array(
     '#type'   => 'submit',
-    '#value'  => 'Back',
+    '#value'  => t('Back'),
     '#weight' => 4,
+  );
+
+  return $form;
+}
+
+
+function _codepsu_get_incorrect_solution_form($form, &$form_state, $nid) {
+  $form = array();
+
+  $node = node_load($nid);
+
+  $form['diff'] = array(
+    '#type'          => 'textarea',
+    '#title'         => 'Diff Output:',
+    '#disabled'      => TRUE,
+    '#weight'        => 0,
+    '#default_value' => file_get_contents($node->_path . '/submissions/team_' . 
+                        $form_state['#team'] . '/prob_' . $form_state['#prob'] . 
+                        '/rev_' . $form_state['#rev'] . '/diff.txt'),
+  );
+
+  $form['solution_output'] = array(
+    '#type'          => 'textarea',
+    '#title'         => 'Solution Output:',
+    '#disabled'      => TRUE,
+    '#weight'        => 1,
+    '#default_value' => file_get_contents($node->_path . '/submissions/team_' . 
+                        $form_state['#team'] . '/prob_' . $form_state['#prob'] . 
+                        '/rev_' . $form_state['#rev'] . '/output.txt'),
+  );
+
+  $form['correct_output'] = array(
+    '#type'          => 'textarea',
+    '#title'         => 'Correct Output:',
+    '#disabled'      => TRUE,
+    '#weight'        => 2,
+    '#default_value' => file_get_contents($node->_path . '/output/prob_' . $form_state['#prob'] . '.txt'),
+  );
+
+
+  $form['spacer'] = array(
+    '#type'   => 'item',
+    '#markup' => '<br />',
+    '#weight' => 3,
+  );
+
+  $form['incorrect_sol'] = array(
+    '#type'   => 'submit',
+    '#value'  => t('Mark as correct'),
+    '#weight' => 4,
+  );
+
+  $form['back'] = array(
+    '#type'   => 'submit',
+    '#value'  => t('Back'),
+    '#weight' => 5,
   );
 
   return $form;
@@ -1634,6 +1878,18 @@ function codepsu_manage_form_validate($form, &$form_state) {
       }
       break;
 
+    // Incorrect solution form confirm
+    case 'edit-incorrect-submit':
+      // Check the only one line from the sub log is selected
+      if(count($form_state['values']['incorrect_queue']) > 1) {
+        form_set_error('incorrect_queue', t('Only one submission may be selected from the incorrect queue at a time.'));
+        return;
+      } else if(count($form_state['values']['incorrect_queue']) == 0) {
+        form_set_error('incorrect_queue', t('No submissions are selected.'));
+        return;
+      }
+      break;
+
     // Clear a team's IP
     case 'edit-ip-submit':
       // Make sure a team is selected
@@ -1661,10 +1917,10 @@ function codepsu_manage_form_submit($form, &$form_state) {
     // Start the competition
     case 'edit-start':
       // Change the running state to started
-      db_update('codepsu')->fields(array('running' => 1))->condition('nid', $form['nid']['#value'], '=')->execute();
+      db_update('codepsu_competitions')->fields(array('running' => 1))->condition('nid', $form['nid']['#value'], '=')->execute();
 
       // Update the start time
-      db_update('codepsu')->fields(array('start_time' => time()))->condition('nid', $form['nid']['#value'], '=')->execute();
+      db_update('codepsu_competitions')->fields(array('start_time' => time()))->condition('nid', $form['nid']['#value'], '=')->execute();
 
       // Update the form variable with the current state so the page doesn't need refreshed
       $form['running']['#value'] = 1;
@@ -1675,10 +1931,10 @@ function codepsu_manage_form_submit($form, &$form_state) {
     // Stop the compeitition
     case 'edit-stop':
       // Change the running state to stopped
-      db_update('codepsu')->fields(array('running' => 0))->condition('nid', $form['nid']['#value'], '=')->execute();
+      db_update('codepsu_competitions')->fields(array('running' => 0))->condition('nid', $form['nid']['#value'], '=')->execute();
 
       // Reset the start time
-      db_update('codepsu')->fields(array('start_time' => 0))->condition('nid', $form['nid']['#value'], '=')->execute();
+      db_update('codepsu_competitions')->fields(array('start_time' => 0))->condition('nid', $form['nid']['#value'], '=')->execute();
 
       // Update the form variable with the current state so the page doesn't need refreshed
       $form['running']['#value'] = 0;
@@ -1707,6 +1963,18 @@ function codepsu_manage_form_submit($form, &$form_state) {
       $form_state['#prob']      = (int)substr($line, strpos($line, 'problem ')+8, 2);
       $form_state['#rev']       = (int)substr($line, strpos($line, 'revision ')+9, 2);
       $form_state['#form_type'] = 'compile';
+      break;
+
+    // Show incorrect solution form
+    case 'edit-incorrect-submit':
+      // Get the team, prob, and rev from the exec log
+      $line = $form['incorrect_queue']['#orig'][array_shift(array_values($form_state['values']['incorrect_queue']))];
+      $form_state['#incorrect_line'] = $line;
+
+      $form_state['#team']      = (int)substr($line, strpos($line, 'Team ')+5, 2);
+      $form_state['#prob']      = (int)substr($line, strpos($line, 'Problem ')+8, 2);
+      $form_state['#rev']       = (int)substr($line, strpos($line, 'revision ')+9, 2);
+      $form_state['#form_type'] = 'incorrect';
       break;
 
     // Clear a team's IP
@@ -1738,7 +2006,8 @@ function codepsu_manage_form_submit($form, &$form_state) {
     case 'edit-confirm-fail':
       // Update the team's results page
       _codepsu_write_results_page($form_state['#_path'], $form_state['#team'], $form_state['#prob'], 
-                                  $form_state['#rev'], 'Compile failure confirmed.', 0);
+                                  $form_state['#rev'], 'Compile failure confirmed.', 0, 
+                                  file_get_contents($form_state['#_path'] . '/submissions/team_' . $form_state['#team'] . '/prob_' . $form_state['#prob'] . '/rev_' . $form_state['#rev'] . '/compile.log'));
       // Update the sub log with the compile failure confirmation
       _codepsu_log_replace_line($form_state['#_path'] . '/submissions.log', $form_state['#compile_line'] . ' | FAILED TO COMPILE', 
                                 $form_state['#compile_line'] . ' | COMPILE FAIL CONFIRMED');
@@ -1752,7 +2021,7 @@ function codepsu_manage_form_submit($form, &$form_state) {
     case 'edit-manual-case':
       // Update the team's results page
       _codepsu_write_results_page($form_state['#_path'], $form_state['#team'], $form_state['#prob'], 
-                                  $form_state['#rev'], 'See a judge for info on why your solution failed to compile.', 0);
+                                  $form_state['#rev'], 'See a judge for info on why your solution failed to compile.', 0, '');
       // Update the sub log with the manual case compile confirmation
       _codepsu_log_replace_line($form_state['#_path'] . '/submissions.log', $form_state['#compile_line'] . ' | FAILED TO COMPILE', 
                                 $form_state['#compile_line'] . ' | MANUAL CASE COMPILE');
@@ -1775,10 +2044,24 @@ function codepsu_manage_form_submit($form, &$form_state) {
     // Solution false positive
     case 'edit-false-positive':
       // Remove the false positive solution from the score log
-      _codepsu_log_replace_line($form_state['#_path'] . '/score.log', $form_state['#con_line'] . '', '');
+      _codepsu_log_replace_line($form_state['#_path'] . '/score.log', $form_state['#con_line'], '');
 
       // Show a confirmation and go back to the main manage form
       drupal_set_message(t('False positive confirmed.'), 'status');
+      $form_state['#form_type'] = 'main';
+      break;
+
+    // Mark incorrect solution as correct
+    case 'edit-incorrect-sol':
+      // Add the info to the score log
+      _codepsu_log_append_line($form_state['#_path'] . '/score.log', 'team_' . (($form_state['#team'] < 10) ? '0' : '') . $form_state['#team'] . ':' . 
+                               (($form_state['#prob'] < 10) ? '0' : '') . $form_state['#prob'] . 'U');
+
+      // Replace the incorrect line in the exec log
+      _codepsu_log_replace_line($form_state['#_path'] . '/exec.log', $form_state['#incorrect_line'], str_replace("\n", '', $form_state['#incorrect_line']) . ' | MARKED AS CORRECT');      
+
+      // Show a confirmation and go back to the main manage form
+      drupal_set_message(t('Solution marked as correct.'), 'status');
       $form_state['#form_type'] = 'main';
       break;
 
@@ -1810,7 +2093,7 @@ function _codepsu_reset($nid) {
   mkdir($node->_path . '/submissions', $perm);
 
   // Re-create team folders in submissions directory
-  $num_teams = count(explode('~', $node->teams))-1;
+  $num_teams = count($node->teams);
   for($i=1; $i<=$num_teams; $i++) {
     if(!is_dir($node->_path . '/submissions/team_' . $i)) {
       mkdir($node->_path . '/submissions/team_' . $i, $perm);
@@ -1819,7 +2102,7 @@ function _codepsu_reset($nid) {
 
   // Clear result pages
   for($i=1; $i<=$num_teams; $i++) {
-    _codepsu_write_results_page($node->_path, $i, 0, 0, '', 1);
+    _codepsu_write_results_page($node->_path, $i, 0, 0, '', 1, '');
   }
 
   // Clear the logs
@@ -1897,8 +2180,8 @@ function _codepsu_log_replace_line($file, $line, $new_line) {
   } while(!$lock);
 
   while(($cur_line = fgets($fd)) !== FALSE) {
-    if($cur_line == $line) {
-      fwrite($tmp_fd, $new_line);
+    if(strpos($cur_line, $line) !== FALSE) {
+      fwrite($tmp_fd, $new_line . "\n");
     } else {
       fwrite($tmp_fd, $cur_line);
     }
@@ -1913,7 +2196,26 @@ function _codepsu_log_replace_line($file, $line, $new_line) {
 }
 
 
+function _codepsu_log_append_line($file, $line) {
+  $fd = fopen($file, 'a');
+
+  // Try to lock the log and if locked, wait for it to become unlocked
+  $loop_check = 0;
+  do {
+      $lock = flock($fd, LOCK_EX);
+      if($loop_check++ > 1000) break;
+  } while(!$lock);
+
+  fwrite($fd, $line . "\n");
+
+  flock($fd, LOCK_UN);
+  fclose($fd);
+}
+
+
 function _codepsu_delete_dir($path) {
+  if($path == '/' || $path == '') return;
+
   if (substr($path, strlen($path) - 1, 1) != '/') {
     $path .= '/';
   }
@@ -1934,11 +2236,15 @@ function _codepsu_delete_dir($path) {
 
 function codepsu_delete(&$node) {
   // Delete the submission directory for the node
-  _codepsu_delete_dir($node->_path);
+  if(!empty($node->_path) && file_exists($node->_path)) {
+    _codepsu_delete_dir($node->_path);
+  }
 
   // Delete the questions node
   node_delete($node->quest_nid);
 
-  // Delete the node from the codepsu db table
-  db_delete('codepsu')->condition('nid', $node->nid)->execute();
+  // Delete the node, teams and problems from the codepsu db tables
+  db_delete('codepsu_competitions')->condition('nid', $node->nid)->execute();
+  db_delete('codepsu_teams')->condition('nid', $node->nid)->execute();
+  db_delete('codepsu_problems')->condition('nid', $node->nid)->execute();
 }

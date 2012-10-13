@@ -3,6 +3,7 @@
 
    $codepsu_path = drupal_get_path('module', 'codepsu');
 
+   // Deal with it
    drupal_add_js('http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js');
    drupal_add_js($codepsu_path . '/scripts/countdown.js');
 
@@ -34,14 +35,8 @@
    }
 
    // Determine number of teams and points
-   $teams  = explode('~', $node->teams);
-   $points = explode('~', $node->points);
-
-   $num_teams = count($teams)-1;
-   $num_probs = count($points)-1;
-   
-   unset($teams[$num_teams]);
-   unset($points[$num_probs]);
+   $num_teams = count($node->teams);
+   $num_probs = count($node->points);
 ?>
 
 <style type="text/css">
@@ -75,6 +70,14 @@
    .odd_cell {
       background-color: #CCCCCC;
    }
+
+   .low_tier {
+      background-color: #E9E6FF;
+   }
+
+   .high_tier {
+      background-color: #816EFF;
+   }
 </style>
 
 <script>
@@ -101,7 +104,11 @@
    <strong>Current Standings:</strong>
    <br />
    <p>C = Confirmed correct solution<br />
-      U = Unconfirmed correct solution</p>
+      U = Unconfirmed correct solution
+      <br /><br />
+      White = Intermediate tier team<br />
+      Blue  = Advanced tier team
+   </p>
 
    <table id="score_table">
       <tr>
@@ -118,7 +125,7 @@
       <?php
          echo '<tr>';
          // Write the team name
-         echo '<td class="' . (($i%2==0) ? 'even_cell' : 'odd_cell') . '">' . ($i+1) . '.) ' . $teams[$i] . '</td>';
+         echo '<td class="' . (($node->tiers[$i] == 1) ? 'low_tier' : 'high_tier') . '">' . ($i+1) . '.) ' . $node->teams[$i] . '</td>';
          
          // Check each line of the score log for the current team
          $probs = array();
@@ -137,10 +144,10 @@
          // For each problem, write an empty cell or the points if the problem was solved
          $total = 0;
          for($j=0; $j<$num_probs; $j++) {
-            echo '<td class="prob_cell ' . (($i%2==0) ? 'even_cell' : 'odd_cell') . '" width="' . round(60/$num_probs) . '%">';
+            echo '<td class="prob_cell ' . (($i%2==0) ? 'even_cell' : 'odd_cell') .  '" width="' . round(60/$num_probs) . '%">';
             if(in_array(($j+1), $probs)) {
-               echo $points[$j] . ' (' . $confirm[$j+1] . ')';
-               $total += $points[$j];
+               echo $node->points[$j] . $confirm[$j+1];
+               $total += $node->points[$j];
             }
             echo '</td>';
          }
