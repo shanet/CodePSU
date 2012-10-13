@@ -27,7 +27,3 @@ purposes without the consent of the author. However, the author simply requests 
 emailing shane@shanetully.com or just let him know you find it useful.
 
 This software is provided 'as-is'. Use at your own risk.
-
-
-
-
